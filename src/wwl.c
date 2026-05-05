@@ -640,6 +640,35 @@ void wwl_set_fps(struct wwl_state *state, int fps) {
     fprintf(stderr, "target frame time: %f\n", state->target_frame_time);
 }
 
+void wwl_draw_pixel(struct wwl_state *state, int x, int y, uint32_t pixel) {
+    if (x >= state->width || x < 0 || y >= state->height || y < 0) {
+        return;
+    }
+
+    state->shm_data[y * state->width + x] = pixel;
+}
+
+void wwl_draw_rect(struct wwl_state *state, int x, int y, int width, int height, uint32_t color) {
+    for (int loop_y = y; loop_y < y + height; loop_y++) {
+        if (loop_y < 0) {
+            continue;
+        }
+        if (loop_y >= state->height) {
+            return;
+        }
+        for (int loop_x = x; loop_x < x + width; loop_x++) {
+            if (loop_x < 0) {
+                continue;
+            }
+            if (loop_x >= state->width) {
+                break;
+            }
+
+            state->shm_data[loop_y * state->width + loop_x] = color;
+        }
+    }
+}
+
 void wwl_set_cursor(struct wwl_state *state, const char *cursor) {
     struct wl_cursor *cur = wl_cursor_theme_get_cursor(state->wl_cursor_theme, cursor);
     struct wl_buffer *buf = wl_cursor_image_get_buffer(cur->images[0]);
@@ -657,11 +686,11 @@ void wwl_set_cursor(struct wwl_state *state, const char *cursor) {
 }
 
 double wwl_get_mouse_x(struct wwl_state *state) {
-    return state->mouse_y;
+    return state->mouse_x;
 }
 
 double wwl_get_mouse_y(struct wwl_state *state) {
-    return state->mouse_x;
+    return state->mouse_y;
 }
 
 bool is_button_pressed(struct wwl_state *state, uint32_t button) {

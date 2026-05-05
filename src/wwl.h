@@ -272,6 +272,9 @@ void wwl_close(struct wwl_state *state);
 
 void wwl_set_fps(struct wwl_state *state, int fps);
 
+void wwl_draw_pixel(struct wwl_state *state, int x, int y, uint32_t pixel);
+void wwl_draw_rect(struct wwl_state *state, int x, int y, int width, int height, uint32_t color);
+
 void wwl_set_cursor(struct wwl_state *state, const char *cursor);
 double wwl_get_mouse_x(struct wwl_state *state);
 double wwl_get_mouse_y(struct wwl_state *state);

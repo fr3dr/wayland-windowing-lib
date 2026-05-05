@@ -5,6 +5,8 @@ int main(void) {
     wwl_set_fps(state, 200);
 
     while (wwl_update(state)) {
+        wwl_draw_rect(state, wwl_get_mouse_x(state) - 50, wwl_get_mouse_y(state) - 50, 100, 100, 0xFFFF0000);
+
         if (is_button_pressed(state, MOUSE_BTN_LEFT)) {
             wwl_set_cursor(state, "cell");
         }
