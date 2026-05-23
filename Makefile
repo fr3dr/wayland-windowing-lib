@@ -8,7 +8,7 @@ BUILDDIR = build
 
 .PHONY: all clean run lib
 
-all: $(TARGET)
+all: $(TARGET) lib
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -23,5 +23,7 @@ lib: $(SRCS) $(BUILDDIR)
 	$(CC) $(SRCS) $(LIBS) -fPIC -shared -o $(BUILDDIR)/lib$(TARGET).so
 
 clean:
-	-rm $(TARGET)
+	-rm $(BUILDDIR)/$(TARGET)
+	-rm $(BUILDDIR)/lib$(TARGET).so
+	-rm -r $(BUILDDIR)
 
