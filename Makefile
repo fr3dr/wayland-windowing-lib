@@ -1,7 +1,7 @@
 TARGET = wwl
 CC = gcc
-CFLAGS = -g -O0 -Wall
-LIBS = -lwayland-client -lwayland-cursor -lxkbcommon
+CFLAGS = -g -O0 -Wall -Wextra
+LIBS = -lwayland-client -lwayland-cursor
 SRCS = $(wildcard src/*.c)
 DEPS = $(wildcard src/*.h)
 BUILDDIR = build
@@ -10,17 +10,17 @@ BUILDDIR = build
 
 all: $(TARGET) lib
 
-$(BUILDDIR):
-	mkdir -p $(BUILDDIR)
-
 $(TARGET): $(SRCS) $(DEPS) $(BUILDDIR)
 	$(CC) $(CFLAGS) $(LIBS) $(SRCS) -o $(BUILDDIR)/$@
+
+lib: $(SRCS) $(BUILDDIR)
+	$(CC) $(SRCS) $(LIBS) -O3 -fPIC -shared -o $(BUILDDIR)/lib$(TARGET).so
 
 run: $(TARGET)
 	./$(BUILDDIR)/$<
 
-lib: $(SRCS) $(BUILDDIR)
-	$(CC) $(SRCS) $(LIBS) -fPIC -shared -o $(BUILDDIR)/lib$(TARGET).so
+$(BUILDDIR):
+	mkdir -p $(BUILDDIR)
 
 clean:
 	-rm $(BUILDDIR)/$(TARGET)
