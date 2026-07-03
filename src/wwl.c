@@ -7,12 +7,13 @@
 #include <string.h>
 #include <stdbool.h>
 #include <sys/mman.h>
-#include <sys/time.h>
 #include <unistd.h>
 #include <wayland-cursor.h>
 #include <wayland-client-protocol.h>
 #include <wayland-client-core.h>
 #include "xdg-shell-client-protocol.h"
+#include "pointer-constraints-client-protocol.h"
+#include "relative-pointer-client-protocol.h"
 #include "wwl.h"
 
 #define MAX_OUTPUT_COUNT 16
@@ -90,41 +91,52 @@ struct wwl_state {
     struct wl_seat *wl_seat;
     struct wl_output *wl_outputs[MAX_OUTPUT_COUNT];
     int wl_output_count;
+    struct zwp_pointer_constraints_v1 *pointer_constraints;
+    struct zwp_relative_pointer_manager_v1 *relative_pointer_manager;
+
     // wayland objects
     struct wl_shm_pool *wl_shm_pool;
     struct wl_buffer *wl_buffer;
     struct wl_surface *wl_surface;
-    struct wl_callback *wl_surface_frame_callback;
     struct xdg_surface *xdg_surface;
     struct xdg_toplevel *xdg_toplevel;
     struct xdg_configure_state xdg_configure;
 
     struct wl_pointer *wl_pointer;
     struct pointer_event pointer_event;
+    struct zwp_confined_pointer_v1 *zwp_confined_pointer;
+    struct zwp_relative_pointer_v1 *zwp_relative_pointer;
+
     struct wl_cursor_theme *wl_cursor_theme;
     struct wl_surface *cursor_surface;
     int cursor_hotspot_x;
     int cursor_hotspot_y;
 
     struct wl_keyboard *wl_keyboard;
+
     // library state
     bool running;
     int width, height;
     int stride;
-    uint32_t background_color;
+
     int fps;
     double target_frame_time;
     double frame_time;
+    struct timespec frame_start, frame_end;
+
+    uint32_t *draw_buffer;
 
     int shm_fd;
     int shm_size;
-    int32_t *shm_data;
+    uint32_t *shm_data;
 
     bool pointer_active;
     uint32_t pointer_serial;
 
     double mouse_x;
     double mouse_y;
+    double mouse_motion_x;
+    double mouse_motion_y;
     uint32_t mouse_button_state;
     uint32_t previous_mouse_button_state;
 
@@ -132,15 +144,11 @@ struct wwl_state {
     bool previous_key_states[MAX_KEY_COUNT];
 };
 
-static void draw_frame(struct wwl_state *state) {
-    for (int y = 0; y < state->height; ++y) {
-        for (int x = 0; x < state->width; ++x) {
-            state->shm_data[y * state->width + x] = state->background_color;
-        }
-    }
+static void commit_frame(struct wwl_state *state) {
+    memcpy(state->shm_data, state->draw_buffer, state->shm_size);
 
     wl_surface_attach(state->wl_surface, state->wl_buffer, 0, 0);
-    wl_surface_damage_buffer(state->wl_surface, 0, 0, INT32_MAX, INT32_MAX);
+    wl_surface_damage(state->wl_surface, 0, 0, INT32_MAX, INT32_MAX);
     wl_surface_commit(state->wl_surface);
 }
 
@@ -179,22 +187,6 @@ const struct xdg_wm_base_listener xdg_wm_base_listener = {
     .ping = xdg_wm_base_ping,
 };
 
-const struct wl_callback_listener wl_surface_frame_listener;
-
-static void wl_surface_frame_done(void *data, struct wl_callback *wl_callback, uint32_t callback_data) {
-    struct wwl_state *state = data;
-
-    wl_callback_destroy(state->wl_surface_frame_callback);
-    state->wl_surface_frame_callback = wl_surface_frame(state->wl_surface);
-    wl_callback_add_listener(state->wl_surface_frame_callback, &wl_surface_frame_listener, state);
-
-    draw_frame(state);
-}
-
-const struct wl_callback_listener wl_surface_frame_listener = {
-    .done = wl_surface_frame_done,
-};
-
 static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, uint32_t serial) {
     struct wwl_state *state = data;
     // fprintf(stderr, "xdg surface configure\n");
@@ -221,13 +213,10 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, u
         state->wl_shm_pool = wl_shm_create_pool(state->wl_shm, state->shm_fd, state->shm_size);
         state->wl_buffer = wl_shm_pool_create_buffer(state->wl_shm_pool, 0, state->width, state->height, state->stride, WL_SHM_FORMAT_ARGB8888);
 
+        state->draw_buffer = realloc(state->draw_buffer, state->shm_size);
+
         xdg_surface_set_window_geometry(state->xdg_surface, 0, 0, state->width, state->height);
-
-        draw_frame(state);
     }
-
-    wl_surface_attach(state->wl_surface, state->wl_buffer, 0, 0);
-    wl_surface_commit(state->wl_surface);
 
     memset(&state->xdg_configure, 0, sizeof(state->xdg_configure));
 }
@@ -391,11 +380,22 @@ static void wl_pointer_frame(void *data, struct wl_pointer *wl_pointer) {
                 state->mouse_button_state &= ~MOUSE_BTN_EXTRA;
             }
         }
-        printf("mouse button state: %08b\n", state->mouse_button_state);
+        // printf("mouse button state: %08b\n", state->mouse_button_state);
     }
 
     memset(event, 0, sizeof(*event));
 }
+
+static void zwp_relative_pointer_relative_motion(void *data, struct zwp_relative_pointer_v1 *zwp_relative_pointer, uint32_t utime_hi, uint32_t utime_lo, wl_fixed_t dx, wl_fixed_t dy, wl_fixed_t dx_unaccel, wl_fixed_t dy_unaccel) {
+    struct wwl_state *state = data;
+
+    state->mouse_motion_x += wl_fixed_to_double(dx);
+    state->mouse_motion_y += wl_fixed_to_double(dy);
+}
+
+const struct zwp_relative_pointer_v1_listener zwp_relative_pointer_listener = {
+    .relative_motion = zwp_relative_pointer_relative_motion,
+};
 
 const struct wl_pointer_listener wl_pointer_listener = {
     .enter = wl_pointer_enter,
@@ -453,9 +453,13 @@ static void wl_seat_capabilities(void *data, struct wl_seat *wl_seat, uint32_t c
     if (has_pointer && state->wl_pointer == NULL) {
         state->wl_pointer = wl_seat_get_pointer(wl_seat);
         wl_pointer_add_listener(state->wl_pointer, &wl_pointer_listener, state);
+        state->zwp_relative_pointer = zwp_relative_pointer_manager_v1_get_relative_pointer(state->relative_pointer_manager, state->wl_pointer);
+        zwp_relative_pointer_v1_add_listener(state->zwp_relative_pointer, &zwp_relative_pointer_listener, state);
     } else if (!has_pointer && state->wl_pointer != NULL) {
         wl_pointer_destroy(state->wl_pointer);
         state->wl_pointer = NULL;
+        zwp_relative_pointer_v1_destroy(state->zwp_relative_pointer);
+        state->zwp_relative_pointer = NULL;
     }
 
     bool has_keyboard = capabilities & WL_SEAT_CAPABILITY_KEYBOARD;
@@ -493,6 +497,10 @@ void wl_registry_global(void *data, struct wl_registry *wl_registry, uint32_t na
         state->wl_outputs[state->wl_output_count] = wl_registry_bind(wl_registry, name, &wl_output_interface, version);
         wl_output_add_listener(state->wl_outputs[state->wl_output_count], &wl_output_listener, state);
         state->wl_output_count++;
+    } else if (strcmp(interface, zwp_pointer_constraints_v1_interface.name) == 0) {
+        state->pointer_constraints = wl_registry_bind(wl_registry, name, &zwp_pointer_constraints_v1_interface, version);
+    } else if (strcmp(interface, zwp_relative_pointer_manager_v1_interface.name) == 0) {
+        state->relative_pointer_manager = wl_registry_bind(wl_registry, name, &zwp_relative_pointer_manager_v1_interface, version);
     }
 }
 
@@ -504,7 +512,7 @@ const struct wl_registry_listener wl_registry_listener = {
     .global_remove = wl_registry_global_remove,
 };
 
-struct wwl_state* wwl_init(int width, int height, const char *title, uint32_t background_color) {
+struct wwl_state* wwl_init(int width, int height, const char *title) {
     struct wwl_state *state = calloc(1, sizeof(struct wwl_state));
     state->running = true;
     state->width = width;
@@ -512,7 +520,6 @@ struct wwl_state* wwl_init(int width, int height, const char *title, uint32_t ba
     state->stride = width * 4;
     state->fps = 0;
     state->target_frame_time = 0;
-    state->background_color = background_color;
 
     state->wl_display = wl_display_connect(NULL);
     state->wl_registry = wl_display_get_registry(state->wl_display);
@@ -528,9 +535,6 @@ struct wwl_state* wwl_init(int width, int height, const char *title, uint32_t ba
     xdg_toplevel_set_app_id(state->xdg_toplevel, title);
     wl_surface_commit(state->wl_surface);
 
-    state->wl_surface_frame_callback = wl_surface_frame(state->wl_surface);
-    wl_callback_add_listener(state->wl_surface_frame_callback, &wl_surface_frame_listener, state);
-
     state->shm_size = state->stride * height;
     state->shm_fd = create_shm_file(state->shm_size);
     state->shm_data = mmap(NULL, state->shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, state->shm_fd, 0);
@@ -538,6 +542,8 @@ struct wwl_state* wwl_init(int width, int height, const char *title, uint32_t ba
         fprintf(stderr, "failed to map shm data, fd: (%d)\n", state->shm_fd);
         return NULL;
     }
+
+    state->draw_buffer = malloc(state->shm_size);
 
     state->wl_shm_pool = wl_shm_create_pool(state->wl_shm, state->shm_fd, state->shm_size);
     state->wl_buffer = wl_shm_pool_create_buffer(state->wl_shm_pool, 0, state->width, state->height, state->stride, WL_SHM_FORMAT_ARGB8888);
@@ -556,6 +562,8 @@ struct wwl_state* wwl_init(int width, int height, const char *title, uint32_t ba
     state->cursor_surface = wl_compositor_create_surface(state->wl_compositor);
     wwl_set_cursor(state, "default");
 
+    wl_display_roundtrip(state->wl_display);
+
     return state;
 }
 
@@ -564,13 +572,7 @@ int wwl_update(struct wwl_state *state) {
         return 0;
     }
 
-    struct timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC_RAW, &start);
-
-    state->previous_mouse_button_state = state->mouse_button_state;
-    for (int i = 0; i < MAX_KEY_COUNT; i++) {
-        state->previous_key_states[i] = state->key_states[i];
-    }
+    clock_gettime(CLOCK_MONOTONIC_RAW, &state->frame_start);
 
     while (wl_display_prepare_read(state->wl_display) != 0) {
         wl_display_dispatch_pending(state->wl_display);
@@ -579,9 +581,22 @@ int wwl_update(struct wwl_state *state) {
     wl_display_read_events(state->wl_display);
     wl_display_dispatch_pending(state->wl_display);
 
-    clock_gettime(CLOCK_MONOTONIC_RAW, &end);
+    return 1;
+}
 
-    state->frame_time = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1000000000.0;
+void wwl_update_end(struct wwl_state *state) {
+    commit_frame(state);
+
+    state->mouse_motion_x = 0;
+    state->mouse_motion_y = 0;
+
+    state->previous_mouse_button_state = state->mouse_button_state;
+    for (int i = 0; i < MAX_KEY_COUNT; i++) {
+        state->previous_key_states[i] = state->key_states[i];
+    }
+
+    clock_gettime(CLOCK_MONOTONIC_RAW, &state->frame_end);
+    state->frame_time = (state->frame_end.tv_sec - state->frame_start.tv_sec) + (state->frame_end.tv_nsec - state->frame_start.tv_nsec) / 1000000000.0;
     if (state->frame_time < state->target_frame_time) {
         double sleep_seconds = state->target_frame_time - state->frame_time;
         time_t sec = sleep_seconds;
@@ -592,13 +607,9 @@ int wwl_update(struct wwl_state *state) {
         while (nanosleep(&req, &req) == -1) continue;
     }
 
-    struct timespec total;
-    clock_gettime(CLOCK_MONOTONIC_RAW, &total);
-
-    double total_frame_time = (total.tv_sec - start.tv_sec) + (total.tv_nsec - start.tv_nsec) / 1000000000.0;
-    fprintf(stderr, "fps: %f\n", 1.0 / total_frame_time);
-
-    return 1;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &state->frame_end);
+    state->frame_time = (state->frame_end.tv_sec - state->frame_start.tv_sec) + (state->frame_end.tv_nsec - state->frame_start.tv_nsec) / 1000000000.0;
+    // fprintf(stderr, "fps: %f\n", 1.0 / state->frame_time);
 }
 
 void wwl_close(struct wwl_state *state) {
@@ -606,7 +617,14 @@ void wwl_close(struct wwl_state *state) {
     close(state->shm_fd);
     wl_shm_pool_destroy(state->wl_shm_pool);
     wl_buffer_destroy(state->wl_buffer);
+    free(state->draw_buffer);
 
+    zwp_relative_pointer_v1_destroy(state->zwp_relative_pointer);
+    zwp_relative_pointer_manager_v1_destroy(state->relative_pointer_manager);
+    if (state->zwp_confined_pointer != NULL) {
+        zwp_confined_pointer_v1_destroy(state->zwp_confined_pointer);
+    }
+    zwp_pointer_constraints_v1_destroy(state->pointer_constraints);
     wl_pointer_destroy(state->wl_pointer);
     wl_cursor_theme_destroy(state->wl_cursor_theme);
 
@@ -615,7 +633,6 @@ void wwl_close(struct wwl_state *state) {
     xdg_toplevel_destroy(state->xdg_toplevel);
     xdg_surface_destroy(state->xdg_surface);
     wl_surface_destroy(state->wl_surface);
-    wl_callback_destroy(state->wl_surface_frame_callback);
 
     xdg_wm_base_destroy(state->xdg_wm_base);
     wl_seat_destroy(state->wl_seat);
@@ -640,12 +657,34 @@ void wwl_set_fps(struct wwl_state *state, int fps) {
     fprintf(stderr, "target frame time: %f\n", state->target_frame_time);
 }
 
+double wwl_get_deltatime(struct wwl_state *state) {
+    return state->frame_time;
+}
+
+void wwl_set_min_size(struct wwl_state *state, int32_t width, int32_t height) {
+    xdg_toplevel_set_min_size(state->xdg_toplevel, width, height);
+    wl_surface_commit(state->wl_surface);
+}
+
+void wwl_set_max_size(struct wwl_state *state, int32_t width, int32_t height) {
+    xdg_toplevel_set_max_size(state->xdg_toplevel, width, height);
+    wl_surface_commit(state->wl_surface);
+}
+
+void wwl_clear_background(struct wwl_state *state, uint32_t color) {
+    for (int y = 0; y < state->height; y++) {
+        for (int x = 0; x < state->width; x++) {
+            state->draw_buffer[y * state->width + x] = color;
+        }
+    }
+}
+
 void wwl_draw_pixel(struct wwl_state *state, int x, int y, uint32_t pixel) {
     if (x >= state->width || x < 0 || y >= state->height || y < 0) {
         return;
     }
 
-    state->shm_data[y * state->width + x] = pixel;
+    state->draw_buffer[y * state->width + x] = pixel;
 }
 
 void wwl_draw_rect(struct wwl_state *state, int x, int y, int width, int height, uint32_t color) {
@@ -664,24 +703,45 @@ void wwl_draw_rect(struct wwl_state *state, int x, int y, int width, int height,
                 break;
             }
 
-            state->shm_data[loop_y * state->width + loop_x] = color;
+            state->draw_buffer[loop_y * state->width + loop_x] = color;
         }
     }
 }
 
 void wwl_set_cursor(struct wwl_state *state, const char *cursor) {
-    struct wl_cursor *cur = wl_cursor_theme_get_cursor(state->wl_cursor_theme, cursor);
-    struct wl_buffer *buf = wl_cursor_image_get_buffer(cur->images[0]);
+    if (cursor == NULL) {
+        wl_surface_attach(state->cursor_surface, NULL, 0, 0);
 
-    wl_surface_attach(state->cursor_surface, buf, 0, 0);
+        state->cursor_hotspot_x = 0;
+        state->cursor_hotspot_y = 0;
+    } else {
+        struct wl_cursor *cur = wl_cursor_theme_get_cursor(state->wl_cursor_theme, cursor);
+        struct wl_buffer *buf = wl_cursor_image_get_buffer(cur->images[0]);
+
+        wl_surface_attach(state->cursor_surface, buf, 0, 0);
+
+        state->cursor_hotspot_x = cur->images[0]->hotspot_x;
+        state->cursor_hotspot_y = cur->images[0]->hotspot_y;
+    }
+
     wl_surface_damage(state->cursor_surface, 0, 0, INT32_MAX, INT32_MAX);
     wl_surface_commit(state->cursor_surface);
 
-    state->cursor_hotspot_x = cur->images[0]->hotspot_x;
-    state->cursor_hotspot_y = cur->images[0]->hotspot_y;
-
     if (state->pointer_active) {
         wl_pointer_set_cursor(state->wl_pointer, state->pointer_serial, state->cursor_surface, state->cursor_hotspot_x, state->cursor_hotspot_y);
+    }
+}
+
+void wwl_lock_cursor(struct wwl_state *state) {
+    if (state->zwp_confined_pointer == NULL) {
+        state->zwp_confined_pointer = zwp_pointer_constraints_v1_confine_pointer(state->pointer_constraints, state->wl_surface, state->wl_pointer, NULL, ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+    }
+}
+
+void wwl_unlock_cursor(struct wwl_state *state) {
+    if (state->zwp_confined_pointer != NULL) {
+        zwp_confined_pointer_v1_destroy(state->zwp_confined_pointer);
+        state->zwp_confined_pointer = NULL;
     }
 }
 
@@ -693,19 +753,26 @@ double wwl_get_mouse_y(struct wwl_state *state) {
     return state->mouse_y;
 }
 
-bool is_button_pressed(struct wwl_state *state, uint32_t button) {
+double wwl_get_mouse_motion_x(struct wwl_state *state) {
+    return state->mouse_motion_x;
+}
+double wwl_get_mouse_motion_y(struct wwl_state *state) {
+    return state->mouse_motion_y;
+}
+
+bool wwl_is_button_pressed(struct wwl_state *state, uint32_t button) {
     return (state->previous_mouse_button_state & button) == 0 && (state->mouse_button_state & button);
 }
 
-bool is_button_down(struct wwl_state *state, uint32_t button) {
+bool wwl_is_button_down(struct wwl_state *state, uint32_t button) {
     return state->mouse_button_state & button;
 }
 
-bool is_button_released(struct wwl_state *state, uint32_t button) {
+bool wwl_is_button_released(struct wwl_state *state, uint32_t button) {
     return (state->previous_mouse_button_state & button) && (state->mouse_button_state & button) == 0;
 }
 
-bool is_key_pressed(struct wwl_state *state, uint32_t key) {
+bool wwl_is_key_pressed(struct wwl_state *state, uint32_t key) {
     if (key >= MAX_KEY_COUNT) {
         return false;
     }
@@ -713,7 +780,7 @@ bool is_key_pressed(struct wwl_state *state, uint32_t key) {
     return state->key_states[key] && !state->previous_key_states[key];
 }
 
-bool is_key_down(struct wwl_state *state, uint32_t key) {
+bool wwl_is_key_down(struct wwl_state *state, uint32_t key) {
     if (key >= MAX_KEY_COUNT) {
         return false;
     }
@@ -721,7 +788,7 @@ bool is_key_down(struct wwl_state *state, uint32_t key) {
     return state->key_states[key];
 }
 
-bool is_key_released(struct wwl_state *state, uint32_t key) {
+bool wwl_is_key_released(struct wwl_state *state, uint32_t key) {
     if (key >= MAX_KEY_COUNT) {
         return false;
     }

@@ -2,6 +2,7 @@
 #define WWL_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 struct wwl_state;
 
@@ -266,24 +267,33 @@ enum key_state {
     MAX_KEY_COUNT,
 };
 
-struct wwl_state* wwl_init(int width, int height, const char *title, uint32_t background_color);
+struct wwl_state* wwl_init(int width, int height, const char *title);
 int wwl_update(struct wwl_state *state);
+void wwl_update_end(struct wwl_state *state);
 void wwl_close(struct wwl_state *state);
 
 void wwl_set_fps(struct wwl_state *state, int fps);
+double wwl_get_deltatime(struct wwl_state *state);
+void wwl_set_min_size(struct wwl_state *state, int32_t width, int32_t height);
+void wwl_set_max_size(struct wwl_state *state, int32_t width, int32_t height);
 
+void wwl_clear_background(struct wwl_state *state, uint32_t color);
 void wwl_draw_pixel(struct wwl_state *state, int x, int y, uint32_t pixel);
 void wwl_draw_rect(struct wwl_state *state, int x, int y, int width, int height, uint32_t color);
 
 void wwl_set_cursor(struct wwl_state *state, const char *cursor);
+void wwl_lock_cursor(struct wwl_state *state);
+void wwl_unlock_cursor(struct wwl_state *state);
 double wwl_get_mouse_x(struct wwl_state *state);
 double wwl_get_mouse_y(struct wwl_state *state);
-bool is_button_pressed(struct wwl_state *state, uint32_t button);
-bool is_button_down(struct wwl_state *state, uint32_t button);
-bool is_button_released(struct wwl_state *state, uint32_t button);
+double wwl_get_mouse_motion_x(struct wwl_state *state);
+double wwl_get_mouse_motion_y(struct wwl_state *state);
+bool wwl_is_button_pressed(struct wwl_state *state, uint32_t button);
+bool wwl_is_button_down(struct wwl_state *state, uint32_t button);
+bool wwl_is_button_released(struct wwl_state *state, uint32_t button);
 
-bool is_key_pressed(struct wwl_state *state, uint32_t key);
-bool is_key_down(struct wwl_state *state, uint32_t key);
-bool is_key_released(struct wwl_state *state, uint32_t key);
+bool wwl_is_key_pressed(struct wwl_state *state, uint32_t key);
+bool wwl_is_key_down(struct wwl_state *state, uint32_t key);
+bool wwl_is_key_released(struct wwl_state *state, uint32_t key);
 
 #endif /* ifndef WWL_H */
