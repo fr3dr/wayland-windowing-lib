@@ -116,8 +116,8 @@ struct wwl_state {
 
     // library state
     bool running;
-    int width, height;
-    int stride;
+    int32_t width, height;
+    int32_t stride;
 
     int fps;
     double target_frame_time;
