@@ -76,7 +76,7 @@ struct pointer_event {
     uint32_t axis_source;
 };
 
-struct xdg_configure_state {
+struct toplevel_configure_event {
     int32_t width, height;
     bool resizing;
 };
@@ -100,7 +100,7 @@ struct wwl_state {
     struct wl_surface *wl_surface;
     struct xdg_surface *xdg_surface;
     struct xdg_toplevel *xdg_toplevel;
-    struct xdg_configure_state xdg_configure;
+    struct toplevel_configure_event toplevel_configure_event;
 
     struct wl_pointer *wl_pointer;
     struct pointer_event pointer_event;
@@ -192,9 +192,9 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, u
     // fprintf(stderr, "xdg surface configure\n");
     xdg_surface_ack_configure(xdg_surface, serial);
 
-    if (state->xdg_configure.resizing) {
-        state->width = state->xdg_configure.width;
-        state->height = state->xdg_configure.height;
+    if (state->toplevel_configure_event.resizing) {
+        state->width = state->toplevel_configure_event.width;
+        state->height = state->toplevel_configure_event.height;
         state->stride = state->width * 4;
 
         munmap(state->shm_data, state->shm_size);
@@ -218,7 +218,7 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, u
         xdg_surface_set_window_geometry(state->xdg_surface, 0, 0, state->width, state->height);
     }
 
-    memset(&state->xdg_configure, 0, sizeof(state->xdg_configure));
+    memset(&state->toplevel_configure_event, 0, sizeof(state->toplevel_configure_event));
 }
 
 const struct xdg_surface_listener xdg_surface_listener = {
@@ -236,18 +236,18 @@ static void xdg_toplevel_configure(void *data, struct xdg_toplevel *xdg_toplevel
     enum xdg_toplevel_state *s;
     wl_array_for_each(s, states) {
         if (*s == XDG_TOPLEVEL_STATE_RESIZING) {
-            state->xdg_configure.resizing = true;
+            state->toplevel_configure_event.resizing = true;
         }
     }
 
     if (width > 0 && height > 0) {
         if (width != state->width || height != state->height) {
-            state->xdg_configure.resizing = true;
+            state->toplevel_configure_event.resizing = true;
         }
     }
 
-    state->xdg_configure.width = width;
-    state->xdg_configure.height = height;
+    state->toplevel_configure_event.width = width;
+    state->toplevel_configure_event.height = height;
 }
 
 static void xdg_toplevel_configure_bounds(void *data, struct xdg_toplevel *xdg_toplevel, int32_t width, int32_t height) {
