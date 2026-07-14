@@ -671,6 +671,10 @@ void wwl_set_max_size(struct wwl_state *state, int32_t width, int32_t height) {
     wl_surface_commit(state->wl_surface);
 }
 
+void wwl_set_title(struct wwl_state *state, const char *title) {
+    xdg_toplevel_set_title(state->xdg_toplevel, title);
+}
+
 void wwl_clear_background(struct wwl_state *state, uint32_t color) {
     for (int y = 0; y < state->height; y++) {
         for (int x = 0; x < state->width; x++) {

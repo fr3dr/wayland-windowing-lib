@@ -276,6 +276,7 @@ void wwl_set_fps(struct wwl_state *state, int fps);
 double wwl_get_deltatime(struct wwl_state *state);
 void wwl_set_min_size(struct wwl_state *state, int32_t width, int32_t height);
 void wwl_set_max_size(struct wwl_state *state, int32_t width, int32_t height);
+void wwl_set_title(struct wwl_state *state, const char *title);
 
 void wwl_clear_background(struct wwl_state *state, uint32_t color);
 void wwl_draw_pixel(struct wwl_state *state, int x, int y, uint32_t pixel);
