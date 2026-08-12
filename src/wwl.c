@@ -720,6 +720,10 @@ void wwl_set_cursor(struct wwl_state *state, const char *cursor) {
         state->cursor_hotspot_y = 0;
     } else {
         struct wl_cursor *cur = wl_cursor_theme_get_cursor(state->wl_cursor_theme, cursor);
+        if (cur == NULL) {
+            fprintf(stderr, "failed to get cursor '%s'\n", cursor);
+            return;
+        }
         struct wl_buffer *buf = wl_cursor_image_get_buffer(cur->images[0]);
 
         wl_surface_attach(state->cursor_surface, buf, 0, 0);
