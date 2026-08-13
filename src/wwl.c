@@ -33,12 +33,14 @@ int create_shm_file(size_t size) {
 
     int fd = shm_open(name, O_RDWR | O_EXCL | O_CREAT, 0600);
     if (fd == -1) {
+        fprintf(stderr, "failed to create shared memory object. fd: (%d)\n", fd);
         exit(errno);
     }
 
     assert(shm_unlink(name) != -1);
 
     if (ftruncate(fd, size) == -1) {
+        fprintf(stderr, "failed to truncate shared memory object. fd: (%d)\n", fd);
         exit(errno);
     }
 
@@ -205,6 +207,7 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, u
         state->shm_fd = create_shm_file(state->shm_size);
         state->shm_data = mmap(NULL, state->shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, state->shm_fd, 0);
         if (state->shm_data == MAP_FAILED) {
+            fprintf(stderr, "failed to map shm data. fd: (%d)\n", state->shm_fd);
             exit(errno);
         }
 
@@ -539,7 +542,7 @@ struct wwl_state* wwl_init(int width, int height, const char *title) {
     state->shm_fd = create_shm_file(state->shm_size);
     state->shm_data = mmap(NULL, state->shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, state->shm_fd, 0);
     if (state->shm_data == MAP_FAILED) {
-        fprintf(stderr, "failed to map shm data, fd: (%d)\n", state->shm_fd);
+        fprintf(stderr, "failed to map shm data. fd: (%d)\n", state->shm_fd);
         return NULL;
     }
 
