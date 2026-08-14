@@ -589,6 +589,7 @@ int wwl_update(struct wwl_state *state) {
 
 void wwl_update_end(struct wwl_state *state) {
     commit_frame(state);
+    wl_display_roundtrip(state->wl_display);
 
     state->mouse_motion_x = 0;
     state->mouse_motion_y = 0;
