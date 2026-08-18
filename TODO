@@ -1,2 +1,11 @@
 implement output listener
 implement tearing control
+
+add get_pixel function
+add get_width and get_height functions
+add get mouse scroll functions
+
+better error handling all around
+better fps profiling
+get keycodes with xkb
+make state variable global
