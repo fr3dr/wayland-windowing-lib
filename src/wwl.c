@@ -588,9 +588,6 @@ int wwl_update(struct wwl_state *state) {
 }
 
 void wwl_update_end(struct wwl_state *state) {
-    commit_frame(state);
-    wl_display_roundtrip(state->wl_display);
-
     state->mouse_motion_x = 0;
     state->mouse_motion_y = 0;
 
@@ -598,6 +595,9 @@ void wwl_update_end(struct wwl_state *state) {
     for (int i = 0; i < MAX_KEY_COUNT; i++) {
         state->previous_key_states[i] = state->key_states[i];
     }
+
+    commit_frame(state);
+    wl_display_roundtrip(state->wl_display);
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &state->frame_end);
     state->frame_time = (state->frame_end.tv_sec - state->frame_start.tv_sec) + (state->frame_end.tv_nsec - state->frame_start.tv_nsec) / 1000000000.0;
