@@ -126,6 +126,8 @@ struct wwl_state {
     double frame_time;
     struct timespec frame_start, frame_end;
 
+    wwl_resize_callback_t resize_callback_func;
+
     uint32_t *draw_buffer;
 
     int shm_fd;
@@ -219,6 +221,10 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, u
         state->draw_buffer = realloc(state->draw_buffer, state->shm_size);
 
         xdg_surface_set_window_geometry(state->xdg_surface, 0, 0, state->width, state->height);
+
+        if (state->resize_callback_func) {
+            state->resize_callback_func(state->width, state->height);
+        }
     }
 
     memset(&state->toplevel_configure_event, 0, sizeof(state->toplevel_configure_event));
@@ -647,6 +653,10 @@ void wwl_close(struct wwl_state *state) {
 
     free(state);
     state = NULL;
+}
+
+void wwl_set_resize_callback(struct wwl_state *state, wwl_resize_callback_t callback) {
+    state->resize_callback_func = callback;
 }
 
 void wwl_set_fps(struct wwl_state *state, int fps) {

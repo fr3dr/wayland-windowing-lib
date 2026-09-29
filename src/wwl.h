@@ -278,6 +278,9 @@ void wwl_set_min_size(struct wwl_state *state, int32_t width, int32_t height);
 void wwl_set_max_size(struct wwl_state *state, int32_t width, int32_t height);
 void wwl_set_title(struct wwl_state *state, const char *title);
 
+typedef void (*wwl_resize_callback_t)(int32_t width, int32_t height);
+void wwl_set_resize_callback(struct wwl_state *state, wwl_resize_callback_t callback);
+
 void wwl_clear_background(struct wwl_state *state, uint32_t color);
 void wwl_draw_pixel(struct wwl_state *state, int x, int y, uint32_t pixel);
 void wwl_draw_rect(struct wwl_state *state, int x, int y, int width, int height, uint32_t color);
