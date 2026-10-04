@@ -129,7 +129,6 @@ struct wwl_state {
     enum wwl_render_mode render_mode;
     int32_t width, height;
 
-    int fps;
     double target_frame_time;
     double frame_time;
     struct timespec frame_start, frame_end;
@@ -552,7 +551,6 @@ struct wwl_state* wwl_init(enum wwl_render_mode render_mode, int width, int heig
     state->render_mode = render_mode;
     state->width = width;
     state->height = height;
-    state->fps = 0;
     state->target_frame_time = 0;
 
     state->wl_display = wl_display_connect(NULL);
@@ -776,12 +774,10 @@ void wwl_gl_get_proc_address(const char *name) {
 
 void wwl_set_fps(struct wwl_state *state, int fps) {
     if (fps <= 0) {
-        state->fps = 0;
         state->target_frame_time = 0;
         return;
     }
 
-    state->fps = fps;
     state->target_frame_time = (1.0 / fps);
     fprintf(stderr, "target frame time: %f\n", state->target_frame_time);
 }
