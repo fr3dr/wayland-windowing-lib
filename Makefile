@@ -1,7 +1,7 @@
 TARGET = wwl
 CC = gcc
 CFLAGS = -g -O0 -Wall -Wextra
-LIBS = -lwayland-client -lwayland-cursor
+LIBS = -lwayland-client -lwayland-cursor -lwayland-egl -lEGL
 SRCS = $(wildcard src/*.c)
 DEPS = $(wildcard src/*.h)
 BUILDDIR = build

@@ -16,6 +16,10 @@
 #include "relative-pointer-client-protocol.h"
 #include "wwl.h"
 
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <wayland-egl.h>
+
 #define MAX_OUTPUT_COUNT 16
 
 // define evdev mouse button codes
@@ -122,8 +126,8 @@ struct wwl_state {
 
     // library state
     bool running;
+    enum wwl_render_mode render_mode;
     int32_t width, height;
-    int32_t stride;
 
     int fps;
     double target_frame_time;
@@ -132,8 +136,16 @@ struct wwl_state {
 
     wwl_resize_callback_t resize_callback_func;
 
-    uint32_t *draw_buffer;
+    // opengl
+    EGLDisplay egl_display;
+    EGLConfig egl_config;
+    EGLContext egl_context;
+    EGLSurface egl_surface;
+    struct wl_egl_window *wl_egl_window;
 
+    // software rendering
+    uint32_t *draw_buffer;
+    int32_t stride;
     int shm_fd;
     int shm_size;
     uint32_t *shm_data;
@@ -153,11 +165,15 @@ struct wwl_state {
 };
 
 static void commit_frame(struct wwl_state *state) {
-    memcpy(state->shm_data, state->draw_buffer, state->shm_size);
+    if (state->render_mode == WWL_MODE_SOFTWARE) {
+        memcpy(state->shm_data, state->draw_buffer, state->shm_size);
 
-    wl_surface_attach(state->wl_surface, state->wl_buffer, 0, 0);
-    wl_surface_damage(state->wl_surface, 0, 0, INT32_MAX, INT32_MAX);
-    wl_surface_commit(state->wl_surface);
+        wl_surface_attach(state->wl_surface, state->wl_buffer, 0, 0);
+        wl_surface_damage(state->wl_surface, 0, 0, INT32_MAX, INT32_MAX);
+        wl_surface_commit(state->wl_surface);
+    } else if (state->render_mode == WWL_MODE_OPENGL) {
+        eglSwapBuffers(state->egl_display, state->egl_surface);
+    }
 }
 
 static void wl_output_geometry(void *data, struct wl_output *wl_output, int32_t x, int32_t y, int32_t physical_width, int32_t physical_height, int32_t subpixel, const char *make, const char *model, int32_t transform) {
@@ -203,26 +219,30 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, u
     if (state->toplevel_configure_event.resizing) {
         state->width = state->toplevel_configure_event.width;
         state->height = state->toplevel_configure_event.height;
-        state->stride = state->width * 4;
 
-        munmap(state->shm_data, state->shm_size);
-        state->shm_size = state->stride * state->height;
-        fprintf(stderr, "shm size: %d\n", state->shm_size);
+        if (state->render_mode == WWL_MODE_SOFTWARE) {
+            state->stride = state->width * 4;
 
-        close(state->shm_fd);
-        state->shm_fd = create_shm_file(state->shm_size);
-        state->shm_data = mmap(NULL, state->shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, state->shm_fd, 0);
-        if (state->shm_data == MAP_FAILED) {
-            fprintf(stderr, "failed to map shm data. fd: (%d)\n", state->shm_fd);
-            exit(errno);
+            munmap(state->shm_data, state->shm_size);
+            state->shm_size = state->stride * state->height;
+
+            close(state->shm_fd);
+            state->shm_fd = create_shm_file(state->shm_size);
+            state->shm_data = mmap(NULL, state->shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, state->shm_fd, 0);
+            if (state->shm_data == MAP_FAILED) {
+                fprintf(stderr, "[ERROR] failed to map shm data. fd: (%d)\n", state->shm_fd);
+                exit(errno);
+            }
+
+            wl_buffer_destroy(state->wl_buffer);
+            wl_shm_pool_destroy(state->wl_shm_pool);
+            state->wl_shm_pool = wl_shm_create_pool(state->wl_shm, state->shm_fd, state->shm_size);
+            state->wl_buffer = wl_shm_pool_create_buffer(state->wl_shm_pool, 0, state->width, state->height, state->stride, WL_SHM_FORMAT_ARGB8888);
+
+            state->draw_buffer = realloc(state->draw_buffer, state->shm_size);
+        } else if (state->render_mode == WWL_MODE_OPENGL) {
+            wl_egl_window_resize(state->wl_egl_window, state->width, state->height, 0, 0);
         }
-
-        wl_buffer_destroy(state->wl_buffer);
-        wl_shm_pool_destroy(state->wl_shm_pool);
-        state->wl_shm_pool = wl_shm_create_pool(state->wl_shm, state->shm_fd, state->shm_size);
-        state->wl_buffer = wl_shm_pool_create_buffer(state->wl_shm_pool, 0, state->width, state->height, state->stride, WL_SHM_FORMAT_ARGB8888);
-
-        state->draw_buffer = realloc(state->draw_buffer, state->shm_size);
 
         xdg_surface_set_window_geometry(state->xdg_surface, 0, 0, state->width, state->height);
 
@@ -525,12 +545,13 @@ const struct wl_registry_listener wl_registry_listener = {
     .global_remove = wl_registry_global_remove,
 };
 
-struct wwl_state* wwl_init(int width, int height, const char *title) {
+struct wwl_state* wwl_init(enum wwl_render_mode render_mode, int width, int height, const char *title) {
     struct wwl_state *state = calloc(1, sizeof(struct wwl_state));
+    memset(state, 0, sizeof(struct wwl_state));
     state->running = true;
+    state->render_mode = render_mode;
     state->width = width;
     state->height = height;
-    state->stride = width * 4;
     state->fps = 0;
     state->target_frame_time = 0;
 
@@ -548,18 +569,95 @@ struct wwl_state* wwl_init(int width, int height, const char *title) {
     xdg_toplevel_set_app_id(state->xdg_toplevel, title);
     wl_surface_commit(state->wl_surface);
 
-    state->shm_size = state->stride * height;
-    state->shm_fd = create_shm_file(state->shm_size);
-    state->shm_data = mmap(NULL, state->shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, state->shm_fd, 0);
-    if (state->shm_data == MAP_FAILED) {
-        fprintf(stderr, "failed to map shm data. fd: (%d)\n", state->shm_fd);
-        return NULL;
+    if (state->render_mode == WWL_MODE_SOFTWARE) {
+        state->stride = width * 4;
+
+        state->shm_size = state->stride * height;
+        state->shm_fd = create_shm_file(state->shm_size);
+        state->shm_data = mmap(NULL, state->shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, state->shm_fd, 0);
+        if (state->shm_data == MAP_FAILED) {
+            fprintf(stderr, "[ERROR] failed to map shm data. fd: (%d)\n", state->shm_fd);
+            goto error;
+        }
+
+        state->draw_buffer = malloc(state->shm_size);
+
+        state->wl_shm_pool = wl_shm_create_pool(state->wl_shm, state->shm_fd, state->shm_size);
+        state->wl_buffer = wl_shm_pool_create_buffer(state->wl_shm_pool, 0, state->width, state->height, state->stride, WL_SHM_FORMAT_ARGB8888);
+    } else if (state->render_mode == WWL_MODE_OPENGL) {
+        // get egl function pointers
+        PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT = (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
+        if (!eglGetPlatformDisplayEXT) {
+            fprintf(stderr, "[ERROR] failed to get address of eglGetPlatformDisplay\n");
+            goto error;
+        }
+        PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC eglCreatePlatformWindowSurfaceEXT = (PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC)eglGetProcAddress("eglCreatePlatformWindowSurfaceEXT");
+        if (!eglCreatePlatformWindowSurfaceEXT) {
+            fprintf(stderr, "[ERROR] failed to get address of eglCreatePlatformWindowSurfaceEXT\n");
+            goto error;
+        }
+
+        // get egl display connection
+        state->egl_display = eglGetPlatformDisplayEXT(EGL_PLATFORM_WAYLAND_EXT, state->wl_display, NULL);
+        if (state->egl_display == EGL_NO_DISPLAY) {
+            fprintf(stderr, "[ERROR] eglGetPlatformDisplay error: 0x%x\n", eglGetError());
+            goto error;
+        }
+        if (!eglInitialize(state->egl_display, NULL, NULL)) {
+            fprintf(stderr, "[ERROR] eglInitialize error: 0x%x\n", eglGetError());
+            goto error;
+        }
+
+        // get egl framebuffer config
+        const EGLint config_attribs[] = {
+            EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+            EGL_RED_SIZE, 8,
+            EGL_BLUE_SIZE, 8,
+            EGL_GREEN_SIZE, 8,
+            EGL_ALPHA_SIZE, 8,
+            EGL_DEPTH_SIZE, 24,
+            EGL_STENCIL_SIZE, 8,
+            EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+            EGL_NONE
+        };
+        EGLint num_config;
+        if (!eglChooseConfig(state->egl_display, config_attribs, &state->egl_config, 1, &num_config) || num_config == 0) {
+            fprintf(stderr, "[ERROR] eglChooseConfig error: 0x%x\n", eglGetError());
+            goto error;
+        }
+
+        // create egl rendering context
+        eglBindAPI(EGL_OPENGL_API);
+        const EGLint context_attribs[] = {
+            EGL_CONTEXT_MAJOR_VERSION, 3,
+            EGL_CONTEXT_MINOR_VERSION, 3,
+            EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+            EGL_NONE
+        };
+        state->egl_context = eglCreateContext(state->egl_display, state->egl_config, EGL_NO_CONTEXT, context_attribs);
+        if (state->egl_context == EGL_NO_CONTEXT) {
+            fprintf(stderr, "[ERROR] eglCreateContext error: 0x%x\n", eglGetError());
+            goto error;
+        }
+
+        // create egl window surface
+        state->wl_egl_window = wl_egl_window_create(state->wl_surface, width, height);
+        if (!state->wl_egl_window) {
+            fprintf(stderr, "[ERROR] eglCreatePlatformWindowSurface error: 0x%x\n", eglGetError());
+            goto error;
+        }
+        state->egl_surface = eglCreatePlatformWindowSurfaceEXT(state->egl_display, state->egl_config, state->wl_egl_window, NULL);
+        if (state->egl_surface == EGL_NO_SURFACE) {
+            fprintf(stderr, "[ERROR] eglCreatePlatformWindowSurface error: 0x%x\n", eglGetError());
+            goto error;
+        }
+
+        // connect the context to the surface
+        if (!eglMakeCurrent(state->egl_display, state->egl_surface, state->egl_surface, state->egl_context)) {
+            fprintf(stderr, "[ERROR] eglMakeCurrent error: 0x%x\n", eglGetError());
+            goto error;
+        }
     }
-
-    state->draw_buffer = malloc(state->shm_size);
-
-    state->wl_shm_pool = wl_shm_create_pool(state->wl_shm, state->shm_fd, state->shm_size);
-    state->wl_buffer = wl_shm_pool_create_buffer(state->wl_shm_pool, 0, state->width, state->height, state->stride, WL_SHM_FORMAT_ARGB8888);
 
     // get xcursor theme and size
     const char *xcursor_theme = getenv("XCURSOR_THEME");
@@ -578,6 +676,10 @@ struct wwl_state* wwl_init(int width, int height, const char *title) {
     wl_display_roundtrip(state->wl_display);
 
     return state;
+
+error:
+    wwl_close(state);
+    return NULL;
 }
 
 int wwl_update(struct wwl_state *state) {
@@ -627,11 +729,16 @@ void wwl_update_end(struct wwl_state *state) {
 }
 
 void wwl_close(struct wwl_state *state) {
-    munmap(state->shm_data, state->shm_size);
-    close(state->shm_fd);
-    wl_shm_pool_destroy(state->wl_shm_pool);
-    wl_buffer_destroy(state->wl_buffer);
-    free(state->draw_buffer);
+    if (state->render_mode == WWL_MODE_SOFTWARE) {
+        munmap(state->shm_data, state->shm_size);
+        close(state->shm_fd);
+        wl_shm_pool_destroy(state->wl_shm_pool);
+        wl_buffer_destroy(state->wl_buffer);
+        free(state->draw_buffer);
+    } else if (state->render_mode == WWL_MODE_OPENGL) {
+        eglTerminate(state->egl_display);
+        wl_egl_window_destroy(state->wl_egl_window);
+    }
 
     zwp_relative_pointer_v1_destroy(state->zwp_relative_pointer);
     zwp_relative_pointer_manager_v1_destroy(state->relative_pointer_manager);
@@ -661,6 +768,10 @@ void wwl_close(struct wwl_state *state) {
 
 void wwl_set_resize_callback(struct wwl_state *state, wwl_resize_callback_t callback) {
     state->resize_callback_func = callback;
+}
+
+void wwl_gl_get_proc_address(const char *name) {
+    eglGetProcAddress(name);
 }
 
 void wwl_set_fps(struct wwl_state *state, int fps) {
@@ -694,6 +805,11 @@ void wwl_set_title(struct wwl_state *state, const char *title) {
 }
 
 void wwl_clear_background(struct wwl_state *state, uint32_t color) {
+    if (state->render_mode != WWL_MODE_SOFTWARE) {
+        fprintf(stderr, "[ERROR] drawing functions are not supported in non-software render modes\n");
+        return;
+    }
+
     for (int y = 0; y < state->height; y++) {
         for (int x = 0; x < state->width; x++) {
             state->draw_buffer[y * state->width + x] = color;
@@ -702,6 +818,11 @@ void wwl_clear_background(struct wwl_state *state, uint32_t color) {
 }
 
 void wwl_draw_pixel(struct wwl_state *state, int x, int y, uint32_t pixel) {
+    if (state->render_mode != WWL_MODE_SOFTWARE) {
+        fprintf(stderr, "[ERROR] drawing functions are not supported in non-software render modes\n");
+        return;
+    }
+
     if (x >= state->width || x < 0 || y >= state->height || y < 0) {
         return;
     }
@@ -710,6 +831,11 @@ void wwl_draw_pixel(struct wwl_state *state, int x, int y, uint32_t pixel) {
 }
 
 void wwl_draw_rect(struct wwl_state *state, int x, int y, int width, int height, uint32_t color) {
+    if (state->render_mode != WWL_MODE_SOFTWARE) {
+        fprintf(stderr, "[ERROR] drawing functions are not supported in non-software render modes\n");
+        return;
+    }
+
     for (int loop_y = y; loop_y < y + height; loop_y++) {
         if (loop_y < 0) {
             continue;

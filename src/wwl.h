@@ -6,6 +6,11 @@
 
 struct wwl_state;
 
+enum wwl_render_mode {
+    WWL_MODE_SOFTWARE,
+    WWL_MODE_OPENGL
+};
+
 enum mouse_button_state {
     MOUSE_BTN_LEFT = 1 << 0,
     MOUSE_BTN_RIGHT = 1 << 1,
@@ -267,10 +272,12 @@ enum key_state {
     MAX_KEY_COUNT,
 };
 
-struct wwl_state* wwl_init(int width, int height, const char *title);
+struct wwl_state* wwl_init(enum wwl_render_mode render_mode, int width, int height, const char *title);
 int wwl_update(struct wwl_state *state);
 void wwl_update_end(struct wwl_state *state);
 void wwl_close(struct wwl_state *state);
+
+void wwl_gl_get_proc_address(const char *name);
 
 void wwl_set_fps(struct wwl_state *state, int fps);
 double wwl_get_deltatime(struct wwl_state *state);
