@@ -26,9 +26,13 @@
 #define BTN_EXTRA 0x114
 
 int create_shm_file(size_t size) {
-    char name[255] = "/";
-    for (int i = 1; i < 255; i++) {
-        name[i] = (double)rand() / (double)RAND_MAX * 26 + 'a';
+    char name[] = "/wwl_shm-XXXXXX";
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    long r = ts.tv_nsec;
+    for (unsigned i = sizeof(name) - 7; i < sizeof(name) - 1; i++) {
+        name[i] = 'A' + (r & 15) + (r & 16) * 2;
+        r >>= 5;
     }
 
     int fd = shm_open(name, O_RDWR | O_EXCL | O_CREAT, 0600);
