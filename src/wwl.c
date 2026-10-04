@@ -156,6 +156,8 @@ struct wwl_state {
     double mouse_y;
     double mouse_motion_x;
     double mouse_motion_y;
+    double mouse_scroll_x;
+    double mouse_scroll_y;
     uint32_t mouse_button_state;
     uint32_t previous_mouse_button_state;
 
@@ -384,6 +386,15 @@ static void wl_pointer_frame(void *data, struct wl_pointer *wl_pointer) {
     if (event->event_mask & POINTER_EVENT_MOTION) {
         state->mouse_x = wl_fixed_to_double(event->surface_x);
         state->mouse_y = wl_fixed_to_double(event->surface_y);
+    }
+
+    if (event->event_mask & POINTER_EVENT_AXIS) {
+        if (event->axis[1].valid) {
+            state->mouse_scroll_x += wl_fixed_to_double(event->axis[1].value);
+        }
+        if (event->axis[0].valid) {
+            state->mouse_scroll_y += wl_fixed_to_double(event->axis[0].value);
+        }
     }
 
     if (event->event_mask & POINTER_EVENT_BUTTON) {
@@ -700,6 +711,8 @@ int wwl_update(struct wwl_state *state) {
 void wwl_update_end(struct wwl_state *state) {
     state->mouse_motion_x = 0;
     state->mouse_motion_y = 0;
+    state->mouse_scroll_x = 0;
+    state->mouse_scroll_y = 0;
 
     state->previous_mouse_button_state = state->mouse_button_state;
     for (int i = 0; i < MAX_KEY_COUNT; i++) {
@@ -906,6 +919,14 @@ double wwl_get_mouse_motion_x(struct wwl_state *state) {
 }
 double wwl_get_mouse_motion_y(struct wwl_state *state) {
     return state->mouse_motion_y;
+}
+
+double wwl_get_mouse_scroll_x(struct wwl_state *state) {
+    return state->mouse_scroll_x;
+}
+
+double wwl_get_mouse_scroll_y(struct wwl_state *state) {
+    return state->mouse_scroll_y;
 }
 
 bool wwl_is_button_pressed(struct wwl_state *state, uint32_t button) {

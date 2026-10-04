@@ -299,6 +299,8 @@ double wwl_get_mouse_x(struct wwl_state *state);
 double wwl_get_mouse_y(struct wwl_state *state);
 double wwl_get_mouse_motion_x(struct wwl_state *state);
 double wwl_get_mouse_motion_y(struct wwl_state *state);
+double wwl_get_mouse_scroll_x(struct wwl_state *state);
+double wwl_get_mouse_scroll_y(struct wwl_state *state);
 bool wwl_is_button_pressed(struct wwl_state *state, uint32_t button);
 bool wwl_is_button_down(struct wwl_state *state, uint32_t button);
 bool wwl_is_button_released(struct wwl_state *state, uint32_t button);
