@@ -20,8 +20,6 @@
 #include <EGL/eglext.h>
 #include <wayland-egl.h>
 
-#define MAX_OUTPUT_COUNT 16
-
 // define evdev mouse button codes
 #define BTN_LEFT 0x110
 #define BTN_RIGHT 0x111
@@ -99,8 +97,6 @@ struct wwl_state {
     struct wl_shm *wl_shm;
     struct xdg_wm_base *xdg_wm_base;
     struct wl_seat *wl_seat;
-    struct wl_output *wl_outputs[MAX_OUTPUT_COUNT];
-    int wl_output_count;
     struct zwp_pointer_constraints_v1 *pointer_constraints;
     struct zwp_relative_pointer_manager_v1 *relative_pointer_manager;
 
@@ -176,33 +172,6 @@ static void commit_frame(struct wwl_state *state) {
         eglSwapBuffers(state->egl_display, state->egl_surface);
     }
 }
-
-static void wl_output_geometry(void *data, struct wl_output *wl_output, int32_t x, int32_t y, int32_t physical_width, int32_t physical_height, int32_t subpixel, const char *make, const char *model, int32_t transform) {
-}
-
-static void wl_output_mode(void *data, struct wl_output *wl_output, uint32_t flags, int32_t width, int32_t height, int32_t refresh) {
-}
-
-static void wl_output_scale(void *data, struct wl_output *wl_output, int32_t factor) {
-}
-
-static void wl_output_name(void *data, struct wl_output *wl_output, const char *name) {
-}
-
-static void wl_output_description(void *data, struct wl_output *wl_output, const char *description) {
-}
-
-static void wl_output_done(void *data, struct wl_output *wl_output) {
-}
-
-const struct wl_output_listener wl_output_listener = {
-    .geometry = wl_output_geometry,
-    .mode = wl_output_mode,
-    .scale = wl_output_scale,
-    .name = wl_output_name,
-    .description = wl_output_description,
-    .done = wl_output_done,
-};
 
 static void xdg_wm_base_ping(void *data, struct xdg_wm_base *xdg_wm_base, uint32_t serial) {
     xdg_wm_base_pong(xdg_wm_base, serial);
@@ -536,10 +505,6 @@ void wl_registry_global(void *data, struct wl_registry *wl_registry, uint32_t na
     } else if (strcmp(interface, wl_seat_interface.name) == 0) {
         state->wl_seat = wl_registry_bind(wl_registry, name, &wl_seat_interface, version);
         wl_seat_add_listener(state->wl_seat, &wl_seat_listener, state);
-    } else if (strcmp(interface, wl_output_interface.name) == 0) {
-        state->wl_outputs[state->wl_output_count] = wl_registry_bind(wl_registry, name, &wl_output_interface, version);
-        wl_output_add_listener(state->wl_outputs[state->wl_output_count], &wl_output_listener, state);
-        state->wl_output_count++;
     } else if (strcmp(interface, zwp_pointer_constraints_v1_interface.name) == 0) {
         state->pointer_constraints = wl_registry_bind(wl_registry, name, &zwp_pointer_constraints_v1_interface, version);
     } else if (strcmp(interface, zwp_relative_pointer_manager_v1_interface.name) == 0) {
