@@ -27,32 +27,6 @@
 #define BTN_SIDE 0x113
 #define BTN_EXTRA 0x114
 
-int create_shm_file(size_t size) {
-    char name[] = "/wwl_shm-XXXXXX";
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    long r = ts.tv_nsec;
-    for (unsigned i = sizeof(name) - 7; i < sizeof(name) - 1; i++) {
-        name[i] = 'A' + (r & 15) + (r & 16) * 2;
-        r >>= 5;
-    }
-
-    int fd = shm_open(name, O_RDWR | O_EXCL | O_CREAT, 0600);
-    if (fd == -1) {
-        fprintf(stderr, "failed to create shared memory object. fd: (%d)\n", fd);
-        exit(errno);
-    }
-
-    assert(shm_unlink(name) != -1);
-
-    if (ftruncate(fd, size) == -1) {
-        fprintf(stderr, "failed to truncate shared memory object. fd: (%d)\n", fd);
-        exit(errno);
-    }
-
-    return fd;
-}
-
 enum pointer_event_mask {
     POINTER_EVENT_ENTER = 1 << 0,
     POINTER_EVENT_LEAVE = 1 << 1,
@@ -160,6 +134,32 @@ struct wwl_state {
     bool key_states[MAX_KEY_COUNT];
     bool previous_key_states[MAX_KEY_COUNT];
 };
+
+static int create_shm_file(size_t size) {
+    char name[] = "/wwl_shm-XXXXXX";
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    long r = ts.tv_nsec;
+    for (unsigned i = sizeof(name) - 7; i < sizeof(name) - 1; i++) {
+        name[i] = 'A' + (r & 15) + (r & 16) * 2;
+        r >>= 5;
+    }
+
+    int fd = shm_open(name, O_RDWR | O_EXCL | O_CREAT, 0600);
+    if (fd == -1) {
+        fprintf(stderr, "failed to create shared memory object. fd: (%d)\n", fd);
+        exit(errno);
+    }
+
+    assert(shm_unlink(name) != -1);
+
+    if (ftruncate(fd, size) == -1) {
+        fprintf(stderr, "failed to truncate shared memory object. fd: (%d)\n", fd);
+        exit(errno);
+    }
+
+    return fd;
+}
 
 static void commit_frame(struct wwl_state *state) {
     if (state->render_mode == WWL_MODE_SOFTWARE) {
